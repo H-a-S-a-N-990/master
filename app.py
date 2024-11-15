@@ -1,79 +1,152 @@
+# ur code
 from flask import Flask, request, jsonify
-from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime, timedelta
-import os
+import sqlite3
+import datetime
+from apscheduler.schedulers.background import BackgroundScheduler
 
-app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///masterlist.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
-
+app = Flask(name)
+PORT = 24457
 OFFLINE_THRESHOLD_MINUTES = 1
 
-class Server(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    ip = db.Column(db.String, nullable=False)
-    port = db.Column(db.Integer, nullable=False)
-    last_seen = db.Column(db.DateTime, default=datetime.utcnow)
-    is_official = db.Column(db.Boolean, default=False)
+conn = sqlite3.connect('masterlist.db')
+cursor = conn.cursor()
 
-# Create the database and the table if they do not exist
-with app.app_context():
-    db.create_all()
+# Create servers table if it doesn't exist
+cursor.execute('''CREATE TABLE IF NOT EXISTS servers
+                (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ip TEXT,
+                port INTEGER,
+                last_seen DATETIME,
+                is_official INTEGER DEFAULT 0)''')
+conn.commit()
 
-@app.route('/announce.php', methods=['POST'])
-def announce():
-    ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+# Function to update server IDs
+def update_ids():
+    print("Updating IDs for the servers table")
+    cursor.execute("SELECT id FROM servers")
+    rows = cursor.fetchall()
+    for index, row in enumerate(rows, start=1):
+        cursor.execute("UPDATE servers SET id = ? WHERE id = ?", (index, row[0]))
+        print(f"Row with id {row[0]} updated to id {index}")
+    print("All updates completed")
+
+# Schedule the update_ids function to run every 30 seconds
+scheduler = BackgroundScheduler()
+scheduler.add_job(update_ids, 'interval', seconds=30)
+scheduler.start()
+# Handle POST request to announce a server
+@app.route('/announce', methods=['POST'])
+def announce_server():
+    ip = request.headers.get('X-Forwarded-For') or request.remote_addr
     port = request.form.get('port')
-    current_time = datetime.utcnow()
+    current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     is_official = 1 if ip in ['127.0.0.1', '127.0.0.2'] else 0
 
-    # Check if the server already exists in the database
-    server = Server.query.filter_by(ip=ip, port=port).first()
+    cursor.execute("SELECT * FROM servers WHERE ip = ? AND port = ?", (ip, port))
+    row = cursor.fetchone()
 
-    if server:
-        # If the server exists, update the last_seen timestamp
-        server.last_seen = current_time
-        db.session.commit()
-        print(f'Server updated successfully: {ip}:{port}')
-        return '', 200
+    if row:
+        cursor.execute("UPDATE servers SET last_seen = ? WHERE ip = ? AND port = ?", (current_time, ip, port))
+        conn.commit()
+        print(f"Server updated successfully: {ip}, {port}")
     else:
-        # If the server doesn't exist, insert a new record
-        new_server = Server(ip=ip, port=port, last_seen=current_time, is_official=is_official)
-        db.session.add(new_server)
-        db.session.commit()
-        print(f'Server registered successfully: {ip}:{port}')
-        return '', 200
+        cursor.execute("INSERT INTO servers (ip, port, last_seen, is_official) VALUES (?, ?, ?, ?)", (ip, port, current_time, is_official))
+        conn.commit()
+        print(f"Server registered successfully: {ip}, {port}")
+
+    return jsonify({"message": "Server announcement processed"})
+
+# Handle GET request to retrieve official servers
+@app.route('/official', methods=['GET'])
+def get_official_servers():
+    cursor.execute("SELECT ip, port FROM servers WHERE is_official = 1")
+    official_servers = cursor.fetchall()
+    return jsonify({"servers": official_servers})
+
+# Handle GET request to retrieve all servers
+@app.route('/servers', methods=['GET'])
+def get_all_servers():
+    cursor.execute("SELECT ip, port, is_official FROM servers")
+    servers = cursor.fetchall()
+    return jsonify({"servers": servers})
+
+if name == 'main':
+    app.run(port=PORT, debug=True)
+    
+    
+----------------------------------------------------------------------------------------------------------------
+# my improved code
+from flask import Flask, request, jsonify
+import sqlite3
+import datetime
+from apscheduler.schedulers.background import BackgroundScheduler
+
+app = Flask(__name__)
+PORT = 24457
+OFFLINE_THRESHOLD_MINUTES = 1
+
+conn = sqlite3.connect('masterlist.db')
+cursor = conn.cursor()
+
+cursor.execute('''CREATE TABLE IF NOT EXISTS servers
+                (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ip TEXT,
+                port INTEGER,
+                last_seen DATETIME,
+                is_official INTEGER DEFAULT 0)''')
+conn.commit()
+
+def update_ids():
+    print("Updating IDs for the servers table")
+    cursor.execute("SELECT id FROM servers")
+    rows = cursor.fetchall()
+    for index, row in enumerate(rows, start=1):
+        cursor.execute("UPDATE servers SET id = ? WHERE id = ?", (index, row[0]))
+        print(f"Row with id {row[0]} updated to id {index}")
+    conn.commit()
+    print("All updates completed")
+
+
+scheduler = BackgroundScheduler()
+scheduler.add_job(update_ids, 'interval', seconds=30)
+scheduler.start()
+
+
+@app.route('/announce', methods=['POST'])
+def announce_server():
+    ip = request.headers.get('X-Forwarded-For') or request.remote_addr
+    port = request.form.get('port')
+    current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    is_official = 1 if ip in ['127.0.0.1', '127.0.0.2'] else 0
+
+    cursor.execute("SELECT * FROM servers WHERE ip = ? AND port = ?", (ip, port))
+    row = cursor.fetchone()
+
+    if row:
+        cursor.execute("UPDATE servers SET last_seen = ? WHERE ip = ? AND port = ?", (current_time, ip, port))
+        conn.commit()
+        print(f"Server updated successfully: {ip}, {port}")
+    else:
+        cursor.execute("INSERT INTO servers (ip, port, last_seen, is_official) VALUES (?, ?, ?, ?)", (ip, port, current_time, is_official))
+        conn.commit()
+        print(f"Server registered successfully: {ip}, {port}")
+
+    return jsonify({"message": "Server announcement processed"})
+
 
 @app.route('/official', methods=['GET'])
-def official_servers():
-    servers = Server.query.filter_by(is_official=True).all()
-    official_servers = [{'ip': server.ip, 'port': server.port} for server in servers]
-    return jsonify({'success': True, 'servers': official_servers})
+def get_official_servers():
+    cursor.execute("SELECT ip, port FROM servers WHERE is_official = 1")
+    official_servers = cursor.fetchall()
+    return jsonify({"servers": official_servers})
+
 
 @app.route('/servers', methods=['GET'])
-def all_servers():
-    servers = Server.query.all()
-    all_servers = [{'ip': server.ip, 'port': server.port, 'is_official': server.is_official} for server in servers]
-    return jsonify({'success': True, 'servers': all_servers})
-
-def remove_offline_servers():
-    offline_threshold = datetime.utcnow() - timedelta(minutes=OFFLINE_THRESHOLD_MINUTES)
-    db.session.query(Server).filter(Server.last_seen < offline_threshold).delete()
-    db.session.commit()
-    print('Offline servers removed successfully.')
-
-# Schedule the removal of offline servers
-import threading
-import time
-
-def schedule_removal():
-    while True:
-        time.sleep(OFFLINE_THRESHOLD_MINUTES * 60)
-        remove_offline_servers()
-
-# Start the scheduled task in a separate thread
-threading.Thread(target=schedule_removal, daemon=True).start()
+def get_all_servers():
+    cursor.execute("SELECT ip, port, is_official FROM servers")
+    servers = cursor.fetchall()
+    return jsonify({"servers": servers})
 
 if __name__ == '__main__':
-    app.run(port=24457)
+    app.run(port=PORT, debug=True)
+    
