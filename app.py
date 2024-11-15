@@ -1,14 +1,16 @@
+import os
 from flask import Flask, request, jsonify
 import sqlite3
 import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
-import os
 
 app = Flask(__name__)
 PORT = 24457
 
 # Ensure the database directory exists
-os.makedirs(os.path.dirname('masterlist.db'), exist_ok=True)
+db_directory = os.path.dirname(os.path.abspath('masterlist.db'))
+os.makedirs(db_directory, exist_ok=True)
+
 
 # Database connection with error handling
 def get_db_connection():
