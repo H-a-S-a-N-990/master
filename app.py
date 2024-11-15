@@ -6,7 +6,6 @@ import os
 
 app = Flask(__name__)
 PORT = 24457
-OFFLINE_THRESHOLD_MINUTES = 1
 
 # Ensure the database directory exists
 os.makedirs(os.path.dirname('masterlist.db'), exist_ok=True)
@@ -141,15 +140,15 @@ def get_all_servers():
             return jsonify({"error": "Database connection failed"}), 500
 
         cursor = conn.cursor()
-        cursor.execute("SELECT ip, port, is_official FROM servers")
-        servers = [dict(row) for row in cursor.fetchall()]
+        cursor.execute("SELECT ip, port, last_seen FROM servers")
+        all_servers = [dict(row) for row in cursor.fetchall()]
         conn.close()
 
-        return jsonify({"servers": servers}), 200
+        return jsonify({"servers": all_servers}), 200
     
     except Exception as e:
         print(f"Error fetching all servers: {e}")
         return jsonify({"error": "Failed to retrieve servers"}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=PORT, debug=True)
+    app.run(host='0.0.0.0', port=PORT)
